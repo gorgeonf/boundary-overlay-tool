@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Boundary Overlay Tool</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --ink: #0e1b2b;
+    --ink-2: #16283f;
+    --paper: #eef1f0;
+    --line: #3a5068;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--sans);
+    background: var(--ink);
+    color: var(--paper);
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--ink-2);
+  }
+  h1 {
+    margin: 0 0 2px;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .ver { font-weight: 400; color: #9db0c2; font-size: 11px; letter-spacing: 0; text-transform: none; }
+  .sub {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: #9db0c2;
+    font-family: var(--mono);
+  }
+  .row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: 10px;
+  }
+  .field {
+    position: relative;
+    flex: 1 1 220px;
+    min-width: 200px;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+  }
+  .field .input-wrap { position: relative; flex: 1; }
+  .field label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9db0c2;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+  }
+  .field input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    color: var(--paper);
+    border-radius: 3px;
+    font-size: 14px;
+    font-family: var(--sans);
+  }
+  .field input[type="text"]:focus {
+    outline: 2px solid #e0933c;
+    outline-offset: 1px;
+  }
+  .swatch { display:inline-block; width:9px; height:9px; border-radius:1px; margin-right:6px; vertical-align:1px; }
+  .icon-btn {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 3px;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-btn:hover { background: var(--line); }
+  .icon-btn.active { background: #e0933c; border-color: #e0933c; color: #0e1b2b; }
+  .suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    border-top: none;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 1000;
+    border-radius: 0 0 3px 3px;
+  }
+  .suggestions div {
+    padding: 7px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(58,80,104,0.4);
+  }
+  .suggestions div:hover, .suggestions div.active {
+    background: var(--line);
+  }
+  .style-row {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: #9db0c2;
+  }
+  .style-row .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  .style-row select {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: var(--sans);
+  }
+  input[type="color"] {
+    width: 24px;
+    height: 20px;
+    border: 1px solid var(--line);
+    background: none;
+    padding: 0;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  input[type="range"] { width: 70px; vertical-align: middle; }
+  .style-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .status {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: #9db0c2;
+    margin-top: 8px;
+    min-height: 14px;
+  }
+  .status.err { color: #e07c5a; }
+  #map {
+    flex: 1;
+    background: #0a1420;
+  }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--ink-2);
+    color: var(--paper);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Boundary Transplant <span class="ver">v6</span></h1>
+  <p class="sub">// take the outline of a city or country, drop it somewhere else, actual size preserved (best at city/country scale, not continent scale)</p>
+
+  <div class="row">
+    <div class="field">
+      <div class="input-wrap">
+        <label><span class="swatch" id="targetSwatch"></span>Source</label>
+        <input id="targetInput" type="text" placeholder="e.g. Paris, or France" autocomplete="off">
+        <div class="suggestions" id="targetSuggestions" style="display:none;"></div>
+      </div>
+      <button class="icon-btn" id="drawBtn" title="Draw your own contour (left-click: add point, right-click: finish)">&#9998;</button>
+      <button class="icon-btn" id="targetConfirmBtn" title="Confirm this place and center the map on it">&#8982;</button>
+    </div>
+    <button class="icon-btn" id="swapBtn" title="Swap source and destination" style="align-self:center;">&#8644;</button>
+    <div class="field">
+      <div class="input-wrap">
+        <label><span class="swatch" id="refSwatch"></span>Destination</label>
+        <input id="refInput" type="text" placeholder="e.g. Vancouver, or Germany" autocomplete="off">
+        <div class="suggestions" id="refSuggestions" style="display:none;"></div>
+      </div>
+      <button class="icon-btn" id="recenterContourBtn" title="Snap the contour back onto the destination">&#8635;</button>
+      <button class="icon-btn" id="refConfirmBtn" title="Confirm this place and center the map on it">&#8982;</button>
+    </div>
+  </div>
+
+  <div class="style-row">
+    <div class="group">
+      <span>Source</span>
+      <input type="color" id="overlayColorInput" value="#e0933c">
+      <label><input type="checkbox" id="overlayFillToggle" checked>fill</label>
+      <input type="range" id="overlayOpacityRange" min="0" max="100" value="22" title="Source fill opacity">
+    </div>
+    <div class="group">
+      <span>Destination</span>
+      <input type="color" id="refColorInput" value="#b7c0c6">
+      <label><input type="checkbox" id="refFillToggle" checked>fill</label>
+      <input type="range" id="refOpacityRange" min="0" max="100" value="18" title="Destination fill opacity">
+    </div>
+    <div class="group">
+      <span>Basemap</span>
+      <select id="basemapSelect">
+        <option value="osm">Standard</option>
+        <option value="esri_street">Street (Esri)</option>
+        <option value="esri_imagery">Satellite (Esri)</option>
+        <option value="opentopo">Terrain</option>
+      </select>
+      <input type="range" id="basemapOpacityRange" min="10" max="100" value="100" title="Basemap opacity">
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+</header>
+
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const state = {
+  target: null,    // { name, geojson, centroidLat, centroidLon, source: 'api'|'custom', placedAt: {lat,lon}|null }
+  reference: null  // { name, geojson (optional), lat, lon }
+};
+
+let overlayColor = '#e0933c';
+let overlayFillVisible = true;
+let overlayFillOpacity = 0.22;
+
+let refColor = '#b7c0c6';
+let refFillVisible = true;
+let refFillOpacity = 0.18;
+
+let basemapOpacity = 1;
+
+document.getElementById('targetSwatch').style.background = overlayColor;
+document.getElementById('refSwatch').style.background = refColor;
+
+const statusEl = document.getElementById('status');
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || '';
+  statusEl.className = 'status' + (isErr ? ' err' : '');
+}
+
+const map = L.map('map', { zoomControl: true }).setView([20, 0], 2);
+
+// ---- basemaps (all free, no API key) ----
+const BASEMAPS = {
+  osm: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; OpenStreetMap contributors', subdomains: 'abc', maxZoom: 19 },
+  esri_street: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles &copy; Esri', maxZoom: 19 },
+  esri_imagery: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: 'Tiles &copy; Esri', maxZoom: 19 },
+  opentopo: { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Style: &copy; OpenTopoMap', subdomains: 'abc', maxZoom: 17 }
+};
+let currentTileLayer = null;
+function setBasemap(key) {
+  if (currentTileLayer) map.removeLayer(currentTileLayer);
+  const cfg = BASEMAPS[key];
+  currentTileLayer = L.tileLayer(cfg.url, {
+    attribution: cfg.attribution, maxZoom: cfg.maxZoom, subdomains: cfg.subdomains || 'abc'
+  }).addTo(map);
+  currentTileLayer.setOpacity(basemapOpacity);
+}
+setBasemap('osm');
+document.getElementById('basemapSelect').addEventListener('change', (e) => setBasemap(e.target.value));
+document.getElementById('basemapOpacityRange').addEventListener('input', (e) => {
+  basemapOpacity = e.target.value / 100;
+  if (currentTileLayer) currentTileLayer.setOpacity(basemapOpacity);
+});
+
+document.getElementById('overlayColorInput').addEventListener('input', (e) => {
+  overlayColor = e.target.value;
+  document.getElementById('targetSwatch').style.background = overlayColor;
+  updateLayers();
+});
+document.getElementById('overlayFillToggle').addEventListener('change', (e) => {
+  overlayFillVisible = e.target.checked;
+  updateLayers();
+});
+document.getElementById('overlayOpacityRange').addEventListener('input', (e) => {
+  overlayFillOpacity = e.target.value / 100;
+  updateLayers();
+});
+
+document.getElementById('refColorInput').addEventListener('input', (e) => {
+  refColor = e.target.value;
+  document.getElementById('refSwatch').style.background = refColor;
+  updateLayers();
+});
+document.getElementById('refFillToggle').addEventListener('change', (e) => {
+  refFillVisible = e.target.checked;
+  updateLayers();
+});
+document.getElementById('refOpacityRange').addEventListener('input', (e) => {
+  refFillOpacity = e.target.value / 100;
+  updateLayers();
+});
+
+let refLayer = null;
+let targetLayer = null;
+
+// ---- Nominatim helpers, throttled to ~1 request/second ----
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
+const MIN_GAP_MS = 1100;
+let lastDispatch = 0;
+let queueTail = Promise.resolve();
+
+function throttledFetch(url, opts) {
+  const run = queueTail.then(async () => {
+    const wait = Math.max(0, lastDispatch + MIN_GAP_MS - Date.now());
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastDispatch = Date.now();
+    return fetch(url, opts);
+  });
+  queueTail = run.catch(() => {});
+  return run;
+}
+
+async function searchPlaces(q) {
+  const url = `${NOMINATIM}/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`;
+  const res = await throttledFetch(url, { headers: { 'Accept-Language': 'en' } });
+  if (!res.ok) throw new Error('search failed');
+  return res.json();
+}
+
+async function fetchBoundary(osmType, osmId, threshold) {
+  const prefix = { node: 'N', way: 'W', relation: 'R' }[osmType];
+  const thresholdParam = threshold ? `&polygon_threshold=${threshold}` : '';
+  const url = `${NOMINATIM}/lookup?osm_ids=${prefix}${osmId}&format=jsonv2&polygon_geojson=1${thresholdParam}`;
+  const res = await throttledFetch(url);
+  if (!res.ok) throw new Error('boundary lookup failed');
+  const data = await res.json();
+  if (!data.length) throw new Error('no boundary returned');
+  return data[0];
+}
+
+// Cities need full detail; countries (especially large ones) have far too
+// many coastline/border points to fetch or drag smoothly at full detail, so
+// simplify proportionally to how big the place's bounding box actually is.
+function boundarySpanDegrees(place) {
+  const bb = (place.boundingbox || []).map(Number); // [south, north, west, east]
+  if (bb.length < 4) return 0;
+  return Math.max(Math.abs(bb[1] - bb[0]), Math.abs(bb[3] - bb[2]));
+}
+function chooseThreshold(place) {
+  const span = boundarySpanDegrees(place);
+  if (span > 20) return 0.02;  // continental-scale countries (Russia, Canada, USA...)
+  if (span > 5) return 0.01;   // most other countries
+  if (span > 1) return 0.002;  // small countries / large metro regions
+  return 0;                    // city scale: full detail
+}
+
+// ---- geometry helpers ----
+function flattenCoords(geometry) {
+  const pts = [];
+  function walk(arr, depth) {
+    if (depth === 0) { pts.push(arr); return; }
+    arr.forEach(a => walk(a, depth - 1));
+  }
+  if (geometry.type === 'Polygon') walk(geometry.coordinates, 2);
+  else if (geometry.type === 'MultiPolygon') walk(geometry.coordinates, 3);
+  return pts;
+}
+
+function bboxCentroid(geometry) {
+  const pts = flattenCoords(geometry);
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  pts.forEach(([lon, lat]) => {
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  });
+  return { lon: (minLon + maxLon) / 2, lat: (minLat + maxLat) / 2 };
+}
+
+function translateGeometry(geometry, fromLat, fromLon, toLat, toLon) {
+  const M_PER_DEG_LAT = 110540;
+  const mPerDegLonAtFrom = 111320 * Math.cos(fromLat * Math.PI / 180);
+  const mPerDegLonAtTo = 111320 * Math.cos(toLat * Math.PI / 180);
+
+  function transformRing(ring) {
+    return ring.map(([lon, lat]) => {
+      const dxMeters = (lon - fromLon) * mPerDegLonAtFrom;
+      const dyMeters = (lat - fromLat) * M_PER_DEG_LAT;
+      const newLon = toLon + dxMeters / mPerDegLonAtTo;
+      const newLat = toLat + dyMeters / M_PER_DEG_LAT;
+      return [newLon, newLat];
+    });
+  }
+
+  if (geometry.type === 'Polygon') {
+    return { type: 'Polygon', coordinates: geometry.coordinates.map(transformRing) };
+  } else if (geometry.type === 'MultiPolygon') {
+    return { type: 'MultiPolygon', coordinates: geometry.coordinates.map(poly => poly.map(transformRing)) };
+  }
+  return geometry;
+}
+
+// Where the source contour should currently be drawn:
+// a manual move wins, otherwise it follows the destination city,
+// otherwise (no destination set) it sits at its own real-world location.
+function currentPlacement() {
+  if (state.target && state.target.placedAt) return state.target.placedAt;
+  if (state.reference) return { lat: state.reference.lat, lon: state.reference.lon };
+  if (state.target) return { lat: state.target.centroidLat, lon: state.target.centroidLon };
+  return null;
+}
+
+// Bug fix: this always jumps to a field's own real-world location,
+// independent of the other field or of any manual contour placement.
+function centerOnLatLon(lat, lon, zoom) {
+  map.setView([lat, lon], zoom || 11, { animate: true });
+}
+
+// ---- autocomplete wiring ----
+function wireAutocomplete(inputId, suggBoxId, onPick, rememberPick) {
+  const input = document.getElementById(inputId);
+  const box = document.getElementById(suggBoxId);
+  let debounceTimer = null;
+
+  input.addEventListener('input', () => {
+    rememberPick(null);
+    const q = input.value.trim();
+    clearTimeout(debounceTimer);
+    if (q.length < 2) { box.style.display = 'none'; return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const results = await searchPlaces(q);
+        renderSuggestions(results);
+      } catch (e) {
+        setStatus('Search failed — Nominatim may be busy, try again shortly.', true);
+      }
+    }, 400);
+  });
+
+  function renderSuggestions(results) {
+    if (!results.length) { box.style.display = 'none'; return; }
+    box.innerHTML = '';
+    results.forEach((r) => {
+      const div = document.createElement('div');
+      div.textContent = r.display_name;
+      div.addEventListener('click', () => {
+        input.value = r.display_name;
+        box.style.display = 'none';
+        rememberPick(r);
+        onPick(r);
+      });
+      box.appendChild(div);
+    });
+    box.style.display = 'block';
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target !== input) box.style.display = 'none';
+  });
+}
+
+let lastPickedTarget = null;
+let lastPickedReference = null;
+
+async function onPickTarget(place) {
+  try {
+    const threshold = chooseThreshold(place);
+    setStatus(`Loading boundary: ${place.display_name.split(',')[0]}${threshold ? ' (large area, simplifying)' : ''}…`);
+    const full = await fetchBoundary(place.osm_type, place.osm_id, threshold);
+    if (!full.geojson || (full.geojson.type !== 'Polygon' && full.geojson.type !== 'MultiPolygon')) {
+      setStatus(`No area boundary available for "${place.display_name}" — try a different result, or use the pencil button to draw one.`, true);
+      return;
+    }
+    const centroid = bboxCentroid(full.geojson);
+    state.target = {
+      name: place.display_name.split(',')[0],
+      geojson: full.geojson,
+      centroidLat: centroid.lat,
+      centroidLon: centroid.lon,
+      source: 'api',
+      placedAt: null,
+      osmType: place.osm_type,
+      osmId: place.osm_id
+    };
+    setStatus('');
+    updateLayers();
+    centerOnLatLon(state.target.centroidLat, state.target.centroidLon);
+  } catch (e) {
+    setStatus('Could not fetch boundary for that place. Try again.', true);
+  }
+}
+
+async function onPickReference(place) {
+  state.reference = {
+    name: place.display_name.split(',')[0],
+    lat: parseFloat(place.lat),
+    lon: parseFloat(place.lon),
+    geojson: null,
+    osmType: place.osm_type,
+    osmId: place.osm_id
+  };
+  if (state.target) state.target.placedAt = null; // new destination: drop any manual offset, snap back
+  const threshold = chooseThreshold(place);
+  setStatus(`Loading boundary: ${place.display_name.split(',')[0]}${threshold ? ' (large area, simplifying)' : ''}…`);
+  try {
+    const full = await fetchBoundary(place.osm_type, place.osm_id, threshold);
+    if (full.geojson && (full.geojson.type === 'Polygon' || full.geojson.type === 'MultiPolygon')) {
+      state.reference.geojson = full.geojson;
+    }
+  } catch (e) {
+    // fine, falls back to a marker
+  }
+  setStatus('');
+  updateLayers();
+  centerOnLatLon(state.reference.lat, state.reference.lon);
+}
+
+wireAutocomplete('targetInput', 'targetSuggestions', onPickTarget, (p) => { lastPickedTarget = p; });
+wireAutocomplete('refInput', 'refSuggestions', onPickReference, (p) => { lastPickedReference = p; });
+
+async function confirmField(inputId, lastPickedGetter, onPick) {
+  const input = document.getElementById(inputId);
+  const text = input.value.trim();
+  if (!text) { setStatus('Type a city name first.', true); return; }
+  const lastPicked = lastPickedGetter();
+  if (lastPicked && lastPicked.display_name === text) {
+    await onPick(lastPicked);
+    return;
+  }
+  try {
+    setStatus(`Searching: ${text}…`);
+    const results = await searchPlaces(text);
+    if (!results.length) { setStatus(`No match for "${text}".`, true); return; }
+    await onPick(results[0]);
+  } catch (e) {
+    setStatus('Search failed — try again.', true);
+  }
+}
+
+document.getElementById('targetConfirmBtn').addEventListener('click', () =>
+  confirmField('targetInput', () => lastPickedTarget, onPickTarget));
+document.getElementById('refConfirmBtn').addEventListener('click', () =>
+  confirmField('refInput', () => lastPickedReference, onPickReference));
+
+document.getElementById('targetInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); confirmField('targetInput', () => lastPickedTarget, onPickTarget); }
+});
+document.getElementById('refInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); confirmField('refInput', () => lastPickedReference, onPickReference); }
+});
+
+// ---- swap source and destination ----
+// Source always carries a full boundary + centroid. Destination may only be a
+// point (no fetchable boundary was found for it), so swapping it into the
+// Source slot sometimes has to attempt fetching that boundary for the first
+// time, using the osm_type/osm_id captured back when it was originally picked.
+async function swapFields() {
+  const oldTarget = state.target;
+  const oldReference = state.reference;
+
+  const newReference = oldTarget ? {
+    name: oldTarget.name,
+    lat: oldTarget.centroidLat,
+    lon: oldTarget.centroidLon,
+    geojson: oldTarget.geojson,
+    osmType: oldTarget.osmType || null,
+    osmId: oldTarget.osmId || null
+  } : null;
+
+  let newTarget = null;
+  if (oldReference) {
+    let geojson = oldReference.geojson;
+    if (!geojson && oldReference.osmType && oldReference.osmId) {
+      setStatus(`Loading boundary: ${oldReference.name}…`);
+      try {
+        const full = await fetchBoundary(oldReference.osmType, oldReference.osmId, 0);
+        if (full.geojson && (full.geojson.type === 'Polygon' || full.geojson.type === 'MultiPolygon')) {
+          geojson = full.geojson;
+        }
+      } catch (e) { /* handled below via the missing-geojson message */ }
+    }
+    if (geojson) {
+      const centroid = bboxCentroid(geojson);
+      newTarget = {
+        name: oldReference.name,
+        geojson,
+        centroidLat: centroid.lat,
+        centroidLon: centroid.lon,
+        source: 'api',
+        placedAt: null,
+        osmType: oldReference.osmType || null,
+        osmId: oldReference.osmId || null
+      };
+    }
+  }
+
+  document.getElementById('targetInput').value = newTarget ? newTarget.name : (oldReference ? oldReference.name : '');
+  document.getElementById('refInput').value = newReference ? newReference.name : '';
+  lastPickedTarget = null;
+  lastPickedReference = null;
+
+  state.target = newTarget;
+  state.reference = newReference;
+
+  if (oldReference && !newTarget) {
+    setStatus(`"${oldReference.name}" has no fetchable area boundary — use the pencil to draw one for it as the new source.`, true);
+  } else {
+    setStatus('');
+  }
+
+  updateLayers();
+  if (state.reference) centerOnLatLon(state.reference.lat, state.reference.lon);
+  else if (state.target) centerOnLatLon(state.target.centroidLat, state.target.centroidLon);
+}
+
+document.getElementById('swapBtn').addEventListener('click', swapFields);
+
+document.getElementById('recenterContourBtn').addEventListener('click', () => {
+  if (!state.reference) { setStatus('Set a destination city first.', true); return; }
+  if (!state.target) { setStatus('Draw or pick a source contour first.', true); return; }
+  state.target.placedAt = null;
+  updateLayers();
+});
+
+// ---- custom contour drawing ----
+// Left-click adds a vertex, right-click closes the polygon and validates it.
+let drawing = false;
+let drawPoints = [];
+let drawPreview = null;
+const drawBtn = document.getElementById('drawBtn');
+
+function startDraw() {
+  drawing = true;
+  drawPoints = [];
+  drawBtn.classList.add('active');
+  // Bug fix: remove any contour currently on the map before drawing, otherwise
+  // its fill intercepts clicks and you can't place points inside it.
+  if (targetLayer) { map.removeLayer(targetLayer); targetLayer = null; }
+  map.getContainer().style.cursor = 'crosshair';
+  map.doubleClickZoom.disable();
+  setStatus('Drawing contour: left-click to add points, right-click to finish (need at least 3 points).');
+  map.on('click', onDrawClick);
+  map.on('contextmenu', onDrawFinish);
+}
+
+function endDraw() {
+  drawing = false;
+  drawBtn.classList.remove('active');
+  map.getContainer().style.cursor = '';
+  map.doubleClickZoom.enable();
+  map.off('click', onDrawClick);
+  map.off('contextmenu', onDrawFinish);
+  if (drawPreview) { map.removeLayer(drawPreview); drawPreview = null; }
+  drawPoints = [];
+}
+
+function onDrawClick(e) {
+  drawPoints.push(e.latlng);
+  if (drawPreview) map.removeLayer(drawPreview);
+  drawPreview = L.layerGroup().addTo(map);
+  L.polyline(drawPoints, { color: overlayColor, weight: 2, dashArray: '4,4' }).addTo(drawPreview);
+  drawPoints.forEach(p => L.circleMarker(p, { radius: 3, color: overlayColor, fillColor: overlayColor, fillOpacity: 1 }).addTo(drawPreview));
+}
+
+function onDrawFinish(e) {
+  e.originalEvent.preventDefault();
+  if (drawPoints.length < 3) {
+    setStatus('Need at least 3 points before finishing a contour.', true);
+    return;
+  }
+  const ring = drawPoints.map(p => [p.lng, p.lat]);
+  ring.push(ring[0]);
+  const geojson = { type: 'Polygon', coordinates: [ring] };
+  const centroid = bboxCentroid(geojson);
+  state.target = {
+    name: document.getElementById('targetInput').value.trim() || 'Custom outline',
+    geojson,
+    centroidLat: centroid.lat,
+    centroidLon: centroid.lon,
+    source: 'custom',
+    placedAt: null
+  };
+  endDraw();
+  setStatus('Custom contour saved. Confirm a destination city to place it there, or right-click the contour to move it.');
+  updateLayers();
+}
+
+drawBtn.addEventListener('click', () => {
+  if (drawing) {
+    endDraw();
+    updateLayers(); // restore whatever contour existed before drawing started
+    setStatus('Drawing cancelled.');
+  } else {
+    startDraw();
+  }
+});
+
+// ---- move the placed contour: right-click it, then click to drop ----
+// Bug fix: a click on the destination (or source) polygon's fill never
+// reaches the map's own click event (Leaflet layers stop it there), so the
+// listener has to be attached to those layers directly as well.
+let moving = false;
+function startMove() {
+  if (moving || !state.target || drawing) return;
+  moving = true;
+  map.getContainer().style.cursor = 'move';
+  setStatus('Move mode: click anywhere on the map, including inside the destination contour, to drop it there (Esc to cancel).');
+  map.on('click', onMoveClick);
+  if (refLayer) refLayer.on('click', onMoveClick);
+  if (targetLayer) targetLayer.on('click', onMoveClick);
+  document.addEventListener('keydown', onMoveEscape);
+}
+function onMoveClick(e) {
+  state.target.placedAt = { lat: e.latlng.lat, lon: e.latlng.lng };
+  cleanupMoveListeners();
+  endMove();
+  setStatus('');
+  updateLayers();
+  map.closePopup(); // a click on a layer also tries to open its bound popup
+}
+function onMoveEscape(e) {
+  if (e.key === 'Escape') {
+    cleanupMoveListeners();
+    endMove();
+    setStatus('Move cancelled.');
+  }
+}
+function cleanupMoveListeners() {
+  map.off('click', onMoveClick);
+  if (refLayer) refLayer.off('click', onMoveClick);
+  if (targetLayer) targetLayer.off('click', onMoveClick);
+}
+function endMove() {
+  moving = false;
+  map.getContainer().style.cursor = '';
+  document.removeEventListener('keydown', onMoveEscape);
+}
+
+// ---- rendering ----
+function updateLayers() {
+  if (refLayer) { map.removeLayer(refLayer); refLayer = null; }
+  if (targetLayer) { map.removeLayer(targetLayer); targetLayer = null; }
+
+  if (state.reference) {
+    if (state.reference.geojson) {
+      refLayer = L.geoJSON(state.reference.geojson, {
+        style: { color: refColor, weight: 1.5, fillColor: refColor, fillOpacity: refFillVisible ? refFillOpacity : 0 }
+      }).addTo(map);
+    } else {
+      refLayer = L.circleMarker([state.reference.lat, state.reference.lon], {
+        radius: 6, color: refColor, weight: 1.5, fillColor: refColor, fillOpacity: refFillVisible ? 0.9 : 0
+      }).addTo(map);
+    }
+    refLayer.bindPopup(`${state.reference.name} (destination)`);
+  }
+
+  if (state.target) {
+    const placement = currentPlacement();
+    const isPlacedElsewhere = !(placement.lat === state.target.centroidLat && placement.lon === state.target.centroidLon);
+    const moved = translateGeometry(
+      state.target.geojson,
+      state.target.centroidLat, state.target.centroidLon,
+      placement.lat, placement.lon
+    );
+    targetLayer = L.geoJSON(moved, {
+      style: {
+        color: overlayColor, weight: 2,
+        fillColor: overlayColor, fillOpacity: overlayFillVisible ? overlayFillOpacity : 0,
+        dashArray: isPlacedElsewhere ? '5,4' : null
+      }
+    }).addTo(map);
+    targetLayer.bindPopup(`${state.target.name}${isPlacedElsewhere ? ' — placed here' : ' (actual location)'}<br><span style="font-size:11px;opacity:0.8">Right-click to move</span>`);
+    targetLayer.on('contextmenu', (e) => { e.originalEvent.preventDefault(); startMove(); });
+  }
+}
+</script>
+</body>
+</html>
